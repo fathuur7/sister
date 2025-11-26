@@ -1,0 +1,4 @@
+# MPI Hostfile for Development (2 nodes)
+
+mpi-master slots=1
+mpi-worker1 slots=1

@@ -1,0 +1,230 @@
+version: '3.8'
+
+# ============================================
+# Development Cluster Setup (Scaled Down)
+# Lighter setup: 1 Slave + 1 Worker + 2 Backends
+# ============================================
+
+networks:
+  database-network:
+    driver: bridge
+  cache-network:
+    driver: bridge
+  mpi-network:
+    driver: bridge
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres-master-data:
+  postgres-slave1-data:
+  redis-master-data:
+  mpi-shared-workspace:
+  video-uploads:
+  video-outputs:
+
+
+services:
+  # ============================================
+  # PostgreSQL Cluster (Master + 1 Slave)
+  # ============================================
+
+  postgres-master:
+    build:
+      context: ./postgres/master
+    container_name: postgres-master
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-transvidio}
+      - POSTGRES_REPLICATION_USER=${POSTGRES_REPLICATION_USER:-replicator}
+      - POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD:-replicator}
+    volumes:
+      - postgres-master-data:/var/lib/postgresql/data
+      - ./postgres/master/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - database-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-slave1:
+    build:
+      context: ./postgres/slave
+    container_name: postgres-slave1
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_MASTER_PORT=5432
+      - POSTGRES_REPLICATION_USER=${POSTGRES_REPLICATION_USER:-replicator}
+      - POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD:-replicator}
+    volumes:
+      - postgres-slave1-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - database-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Redis (Master only for dev)
+  # ============================================
+
+  redis-master:
+    image: redis:7-alpine
+    container_name: redis-master
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      - redis-master-data:/data
+      - ./redis/redis-master.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - cache-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================
+  # MPI Cluster (Master + 1 Worker)
+  # ============================================
+
+  mpi-master:
+    build:
+      context: ./mpi
+    container_name: mpi-master
+    hostname: mpi-master
+    environment:
+      - MPI_ROLE=master
+      - MPI_WORKER_COUNT=1
+    volumes:
+      - mpi-shared-workspace:/mpi/workspace
+      - ./mpi/hostfile-dev:/etc/mpi/hostfile
+      - ./mpi/mpi_service.py:/mpi/mpi_service.py
+    networks:
+      - mpi-network
+    command: /bin/bash -c "sleep infinity"
+
+  mpi-worker1:
+    build:
+      context: ./mpi
+    container_name: mpi-worker1
+    hostname: mpi-worker1
+    environment:
+      - MPI_ROLE=worker
+      - MPI_MASTER_HOST=mpi-master
+    volumes:
+      - mpi-shared-workspace:/mpi/workspace
+    networks:
+      - mpi-network
+    depends_on:
+      - mpi-master
+    command: /bin/bash -c "sleep infinity"
+
+  # ============================================
+  # Backend Services (2 replicas)
+  # ============================================
+
+  backend1:
+    build:
+      context: ./translate-backend
+    container_name: backend1
+    hostname: backend1
+    environment:
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_SLAVE_HOSTS=postgres-slave1
+      - REDIS_HOST=redis-master
+      - MPI_MASTER_HOST=mpi-master
+      - WHISPER_MODEL=${WHISPER_MODEL:-tiny}
+    env_file:
+      - .env.cluster
+    volumes:
+      - video-uploads:/app/uploads
+      - video-outputs:/app/output
+      - mpi-shared-workspace:/mpi/workspace
+    networks:
+      - app-network
+      - database-network
+      - cache-network
+      - mpi-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend2:
+    build:
+      context: ./translate-backend
+    container_name: backend2
+    hostname: backend2
+    environment:
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_SLAVE_HOSTS=postgres-slave1
+      - REDIS_HOST=redis-master
+      - MPI_MASTER_HOST=mpi-master
+      - WHISPER_MODEL=${WHISPER_MODEL:-tiny}
+    env_file:
+      - .env.cluster
+    volumes:
+      - video-uploads:/app/uploads
+      - video-outputs:/app/output
+      - mpi-shared-workspace:/mpi/workspace
+    networks:
+      - app-network
+      - database-network
+      - cache-network
+      - mpi-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # Nginx Load Balancer
+  # ============================================
+
+  nginx:
+    build:
+      context: ./nginx
+    container_name: nginx-loadbalancer
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx-dev.conf:/etc/nginx/nginx.conf:ro
+      - video-outputs:/var/www/outputs:ro
+    networks:
+      - app-network
+    depends_on:
+      - backend1
+      - backend2
+    healthcheck:
+      test: [ "CMD", "nginx", "-t" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3

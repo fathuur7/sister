@@ -1,0 +1,6 @@
+# MPI Hostfile
+# Defines cluster topology
+
+mpi-master slots=1
+mpi-worker1 slots=1
+mpi-worker2 slots=1

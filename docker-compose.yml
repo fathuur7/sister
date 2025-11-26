@@ -1,0 +1,389 @@
+version: '3.8'
+
+# ============================================
+# Production Cluster Setup
+# Full setup: 1 Master + 2 Slaves + MPI + Redis + Nginx
+# ============================================
+
+networks:
+  database-network:
+    driver: bridge
+  cache-network:
+    driver: bridge
+  mpi-network:
+    driver: bridge
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres-master-data:
+  postgres-slave1-data:
+  postgres-slave2-data:
+  redis-master-data:
+  redis-slave1-data:
+  redis-slave2-data:
+  mpi-shared-workspace:
+  video-uploads:
+  video-outputs:
+
+
+services:
+  # ============================================
+  # PostgreSQL Cluster (Master-Slave Replication)
+  # ============================================
+
+  postgres-master:
+    build:
+      context: ./postgres/master
+      dockerfile: Dockerfile
+    container_name: postgres-master
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-transvidio}
+      - POSTGRES_REPLICATION_USER=${POSTGRES_REPLICATION_USER:-replicator}
+      - POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD:-replicator}
+    volumes:
+      - postgres-master-data:/var/lib/postgresql/data
+      - ./postgres/master/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - database-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres-slave1:
+    build:
+      context: ./postgres/slave
+      dockerfile: Dockerfile
+    container_name: postgres-slave1
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_MASTER_PORT=5432
+      - POSTGRES_REPLICATION_USER=${POSTGRES_REPLICATION_USER:-replicator}
+      - POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD:-replicator}
+    volumes:
+      - postgres-slave1-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - database-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres-slave2:
+    build:
+      context: ./postgres/slave
+      dockerfile: Dockerfile
+    container_name: postgres-slave2
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_MASTER_PORT=5432
+      - POSTGRES_REPLICATION_USER=${POSTGRES_REPLICATION_USER:-replicator}
+      - POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD:-replicator}
+    volumes:
+      - postgres-slave2-data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    networks:
+      - database-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ============================================
+  # Redis Cluster (Master-Slave + Sentinel)
+  # ============================================
+
+  redis-master:
+    image: redis:7-alpine
+    container_name: redis-master
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      - redis-master-data:/data
+      - ./redis/redis-master.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - cache-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis-slave1:
+    image: redis:7-alpine
+    container_name: redis-slave1
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      - redis-slave1-data:/data
+      - ./redis/redis-slave.conf:/usr/local/etc/redis/redis.conf
+    environment:
+      - REDIS_MASTER_HOST=redis-master
+    ports:
+      - "6380:6379"
+    networks:
+      - cache-network
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis-slave2:
+    image: redis:7-alpine
+    container_name: redis-slave2
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      - redis-slave2-data:/data
+      - ./redis/redis-slave.conf:/usr/local/etc/redis/redis.conf
+    environment:
+      - REDIS_MASTER_HOST=redis-master
+    ports:
+      - "6381:6379"
+    networks:
+      - cache-network
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  redis-sentinel1:
+    image: redis:7-alpine
+    container_name: redis-sentinel1
+    command: redis-sentinel /usr/local/etc/redis/sentinel.conf
+    volumes:
+      - ./redis/sentinel.conf:/usr/local/etc/redis/sentinel.conf
+    networks:
+      - cache-network
+    depends_on:
+      - redis-master
+      - redis-slave1
+      - redis-slave2
+    restart: unless-stopped
+
+  # ============================================
+  # MPI Cluster (Master + Workers)
+  # ============================================
+
+  mpi-master:
+    build:
+      context: ./mpi
+      dockerfile: Dockerfile
+    container_name: mpi-master
+    hostname: mpi-master
+    environment:
+      - MPI_ROLE=master
+      - MPI_WORKER_COUNT=2
+    volumes:
+      - mpi-shared-workspace:/mpi/workspace
+      - ./mpi/hostfile:/etc/mpi/hostfile
+      - ./mpi/mpi_service.py:/mpi/mpi_service.py
+    networks:
+      - mpi-network
+    command: /bin/bash -c "sleep infinity"
+    restart: unless-stopped
+
+  mpi-worker1:
+    build:
+      context: ./mpi
+      dockerfile: Dockerfile
+    container_name: mpi-worker1
+    hostname: mpi-worker1
+    environment:
+      - MPI_ROLE=worker
+      - MPI_MASTER_HOST=mpi-master
+    volumes:
+      - mpi-shared-workspace:/mpi/workspace
+    networks:
+      - mpi-network
+    depends_on:
+      - mpi-master
+    command: /bin/bash -c "sleep infinity"
+    restart: unless-stopped
+
+  mpi-worker2:
+    build:
+      context: ./mpi
+      dockerfile: Dockerfile
+    container_name: mpi-worker2
+    hostname: mpi-worker2
+    environment:
+      - MPI_ROLE=worker
+      - MPI_MASTER_HOST=mpi-master
+    volumes:
+      - mpi-shared-workspace:/mpi/workspace
+    networks:
+      - mpi-network
+    depends_on:
+      - mpi-master
+    command: /bin/bash -c "sleep infinity"
+    restart: unless-stopped
+
+  # ============================================
+  # Backend Services (3 replicas for load balancing)
+  # ============================================
+
+  backend1:
+    build:
+      context: ./translate-backend
+      dockerfile: Dockerfile
+    container_name: backend1
+    hostname: backend1
+    environment:
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_SLAVE_HOSTS=postgres-slave1,postgres-slave2
+      - REDIS_HOST=redis-master
+      - MPI_MASTER_HOST=mpi-master
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+    env_file:
+      - .env.cluster
+    volumes:
+      - video-uploads:/app/uploads
+      - video-outputs:/app/output
+      - mpi-shared-workspace:/mpi/workspace
+    networks:
+      - app-network
+      - database-network
+      - cache-network
+      - mpi-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  backend2:
+    build:
+      context: ./translate-backend
+      dockerfile: Dockerfile
+    container_name: backend2
+    hostname: backend2
+    environment:
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_SLAVE_HOSTS=postgres-slave1,postgres-slave2
+      - REDIS_HOST=redis-master
+      - MPI_MASTER_HOST=mpi-master
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+    env_file:
+      - .env.cluster
+    volumes:
+      - video-uploads:/app/uploads
+      - video-outputs:/app/output
+      - mpi-shared-workspace:/mpi/workspace
+    networks:
+      - app-network
+      - database-network
+      - cache-network
+      - mpi-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  backend3:
+    build:
+      context: ./translate-backend
+      dockerfile: Dockerfile
+    container_name: backend3
+    hostname: backend3
+    environment:
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_SLAVE_HOSTS=postgres-slave1,postgres-slave2
+      - REDIS_HOST=redis-master
+      - MPI_MASTER_HOST=mpi-master
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+    env_file:
+      - .env.cluster
+    volumes:
+      - video-uploads:/app/uploads
+      - video-outputs:/app/output
+      - mpi-shared-workspace:/mpi/workspace
+    networks:
+      - app-network
+      - database-network
+      - cache-network
+      - mpi-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # ============================================
+  # Nginx Load Balancer
+  # ============================================
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: nginx-loadbalancer
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - video-outputs:/var/www/outputs:ro
+    networks:
+      - app-network
+    depends_on:
+      - backend1
+      - backend2
+      - backend3
+    healthcheck:
+      test: [ "CMD", "nginx", "-t" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped

@@ -1,0 +1,36 @@
+# --- Core Frameworks ---
+fastapi
+uvicorn[standard]
+flask
+flask-cors
+
+# --- Google OAuth2 Auth ---
+google-auth
+google-auth-oauthlib
+requests
+python-dotenv
+
+# --- JWT Authentication ---
+python-jose[cryptography]
+passlib[bcrypt]
+
+# --- Audio & Video Processing ---
+openai-whisper
+faster-whisper
+moviepy
+ffmpeg-python
+python-multipart
+
+# --- Translation ---
+deep-translator
+
+# --- Database ---
+sqlalchemy
+werkzeug
+psycopg2-binary
+
+# --- Caching ---
+redis
+
+# --- MPI for Parallel Processing ---
+mpi4py
