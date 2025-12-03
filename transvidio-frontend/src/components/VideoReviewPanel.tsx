@@ -75,7 +75,7 @@ export const VideoReviewPanel = ({
                 {/* Subtitle overlay */}
                 {currentSubtitle && (
                     <div
-                        className={`absolute left-0 right-0 flex justify-center px-4 ${subtitleStyle.position === 'top' ? 'top-20' : 'bottom-20'
+                        className={`absolute left-0 right-0 flex justify-center px-4 ${subtitleStyle.position === 'top' ? 'top-8 lg:top-20' : 'bottom-16 lg:bottom-20'
                             }`}
                     >
                         <div

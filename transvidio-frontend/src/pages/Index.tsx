@@ -188,12 +188,12 @@ const Index = () => {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <Navbar />
 
-      <main className="flex-1 px-6 py-6">
+      <main className="flex-1 px-4 py-4 lg:px-6 lg:py-6">
         <div className="max-w-[1800px] mx-auto">
           {/* 3-Column Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr_350px] gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr_350px] gap-4 lg:gap-6">
             {/* Left Column - Upload & Configure */}
-            <div className="bg-card border border-border rounded-xl p-6 h-fit sticky top-6">
+            <div className="bg-card border border-border rounded-xl p-4 lg:p-6 h-fit lg:sticky lg:top-6">
               <UploadPanel
                 videoFile={videoFile}
                 dragActive={dragActive}
@@ -209,7 +209,7 @@ const Index = () => {
             </div>
 
             {/* Center Column - Video Review */}
-            <div className="bg-card border border-border rounded-xl p-6">
+            <div className="bg-card border border-border rounded-xl p-4 lg:p-6">
               {videoUrl ? (
                 <VideoReviewPanel
                   videoUrl={videoUrl}
@@ -225,14 +225,14 @@ const Index = () => {
                   videoRef={videoRef}
                 />
               ) : (
-                <div className="flex items-center justify-center h-96 text-muted-foreground">
+                <div className="flex items-center justify-center h-64 lg:h-96 text-muted-foreground">
                   <p>Upload a video to begin</p>
                 </div>
               )}
             </div>
 
             {/* Right Column - Translation */}
-            <div className="bg-card border border-border rounded-xl p-6 h-fit sticky top-6">
+            <div className="bg-card border border-border rounded-xl p-4 lg:p-6 h-fit lg:sticky lg:top-6">
               <TranslationPanel
                 subtitles={subtitles}
                 currentTime={currentTime}
