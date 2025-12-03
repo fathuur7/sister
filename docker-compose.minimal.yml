@@ -1,0 +1,185 @@
+version: '3.8'
+
+# ============================================
+# Minimal Cluster Setup (SIMPLER & FASTER)
+# PostgreSQL Cluster + Redis + Nginx + Backends
+# NO MPI (untuk avoid dependency hell)
+# ============================================
+
+networks:
+  database-network:
+    driver: bridge
+  cache-network:
+    driver: bridge
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres-master-data:
+  postgres-slave1-data:
+  redis-data:
+  video-uploads:
+  video-outputs:
+
+
+services:
+  # ============================================
+  # PostgreSQL Cluster (Master + 1 Slave)
+  # ============================================
+
+  postgres-master:
+    build:
+      context: ./postgres/master
+    container_name: postgres-master
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-transvidio}
+      - POSTGRES_REPLICATION_USER=${POSTGRES_REPLICATION_USER:-replicator}
+      - POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD:-replicator}
+    volumes:
+      - postgres-master-data:/var/lib/postgresql/data
+      - ./postgres/master/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - database-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-slave1:
+    build:
+      context: ./postgres/slave
+    container_name: postgres-slave1
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_MASTER_PORT=5432
+      - POSTGRES_REPLICATION_USER=${POSTGRES_REPLICATION_USER:-replicator}
+      - POSTGRES_REPLICATION_PASSWORD=${POSTGRES_REPLICATION_PASSWORD:-replicator}
+    volumes:
+      - postgres-slave1-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    networks:
+      - database-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Redis (Single instance untuk simplicity)
+  # ============================================
+
+  redis-master:
+    image: redis:7-alpine
+    container_name: redis-master
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - cache-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================
+  # Backend Services (2 replicas)
+  # ============================================
+
+  backend1:
+    build:
+      context: ./translate-backend
+    container_name: backend1
+    hostname: backend1
+    environment:
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_SLAVE_HOSTS=postgres-slave1
+      - REDIS_HOST=redis-master
+      - WHISPER_MODEL=${WHISPER_MODEL:-tiny}
+    env_file:
+      - .env.cluster
+    volumes:
+      - video-uploads:/app/uploads
+      - video-outputs:/app/output
+    networks:
+      - app-network
+      - database-network
+      - cache-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend2:
+    build:
+      context: ./translate-backend
+    container_name: backend2
+    hostname: backend2
+    environment:
+      - POSTGRES_MASTER_HOST=postgres-master
+      - POSTGRES_SLAVE_HOSTS=postgres-slave1
+      - REDIS_HOST=redis-master
+      - WHISPER_MODEL=${WHISPER_MODEL:-tiny}
+    env_file:
+      - .env.cluster
+    volumes:
+      - video-uploads:/app/uploads
+      - video-outputs:/app/output
+    networks:
+      - app-network
+      - database-network
+      - cache-network
+    depends_on:
+      postgres-master:
+        condition: service_healthy
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # Nginx Load Balancer
+  # ============================================
+
+  nginx:
+    build:
+      context: ./nginx
+    container_name: nginx-loadbalancer
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx-simple.conf:/etc/nginx/nginx.conf:ro
+      - video-outputs:/var/www/outputs:ro
+    networks:
+      - app-network
+    depends_on:
+      - backend1
+      - backend2
+    healthcheck:
+      test: [ "CMD", "nginx", "-t" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3

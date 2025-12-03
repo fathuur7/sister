@@ -1,15 +1,14 @@
 # MPI-specific Python requirements
 mpi4py==3.1.5
 
-# Video processing
-faster-whisper==0.10.0
-openai-whisper==20231117
+# Video processing - using newer versions for compatibility
+faster-whisper==1.0.0
 deep-translator==1.11.4
 moviepy==1.0.3
 ffmpeg-python==0.2.0
 
 # Numerical computing
-numpy==1.24.3
+numpy==1.26.4
 scipy==1.11.4
 
 # Database and caching

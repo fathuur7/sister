@@ -1,6 +1,9 @@
+# Kembali ke image standar python:3.11-slim (Debian 12 Bookworm)
+# Image ini lebih kompatibel dengan binary wheels modern
 FROM python:3.11-slim
 
-# Install system dependencies including build tools for PyAV
+# Install system dependencies
+# HAPUS library libav*-dev agar pip tidak mencoba build dari source yang akan gagal
 RUN apt-get update && apt-get install -y \
     build-essential \
     gfortran \
@@ -10,13 +13,10 @@ RUN apt-get update && apt-get install -y \
     openssh-server \
     openssh-client \
     ffmpeg \
+    git \
     pkg-config \
-    libavformat-dev \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavutil-dev \
-    libswscale-dev \
-    libswresample-dev \
+    # Library tambahan untuk mendukung binary wheels
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure SSH for passwordless communication
@@ -25,7 +25,7 @@ RUN echo 'root:mpicluster' | chpasswd
 RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
 RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
-# SSH login fix (prevent user being kicked off after exec)
+# SSH login fix
 RUN sed -i 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' /etc/pam.d/sshd
 
 # Create MPI directories
@@ -36,9 +36,16 @@ WORKDIR /mpi
 COPY ssh_config /root/.ssh/config
 RUN chmod 600 /root/.ssh/config
 
-# Install Python MPI and ML libraries
+# Copy requirements
 COPY requirements-mpi.txt /mpi/requirements-mpi.txt
-RUN pip install --no-cache-dir -r requirements-mpi.txt
+
+# Install Python libraries
+# 1. Upgrade pip dan wheel agar bisa mendeteksi binary wheels dengan benar
+# 2. Force install 'av' dari binary wheel untuk menghindari kompilasi ulang yang error
+# 3. Install sisa requirements dengan timeout tinggi untuk koneksi lambat
+RUN pip install --no-cache-dir --upgrade pip wheel setuptools && \
+    pip install --no-cache-dir --only-binary=:all: av==11.0.0 && \
+    pip install --no-cache-dir --default-timeout=1000 -r requirements-mpi.txt
 
 # Expose SSH port
 EXPOSE 22
