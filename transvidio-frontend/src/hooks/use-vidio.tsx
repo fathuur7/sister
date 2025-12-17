@@ -176,7 +176,7 @@ const useVideoProcessing = () => {
             formData.append("video_file", videoFile);
             formData.append("target_language", targetLanguage);
 
-            const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
+            const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
 
             const response = await fetch(`${BASE_URL}/translate-video/`, {
                 method: "POST",

@@ -2,10 +2,11 @@
 mpi4py==3.1.5
 
 # Video processing - using newer versions for compatibility
-faster-whisper==1.0.0
+faster-whisper>=1.1.0
 deep-translator==1.11.4
-moviepy==1.0.3
+moviepy>=2.0.0
 ffmpeg-python==0.2.0
+imageio[ffmpeg]
 
 # Numerical computing
 numpy==1.26.4

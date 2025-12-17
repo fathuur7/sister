@@ -2,11 +2,19 @@
 -- PostgreSQL Master Initialization Script
 -- ============================================
 
--- Create replication user
-CREATE USER replicator WITH REPLICATION ENCRYPTED PASSWORD 'replicator';
+-- Create replication user (idempotent)
+DO
+$$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_user WHERE usename = 'replicator') THEN
+        CREATE USER replicator WITH REPLICATION ENCRYPTED PASSWORD 'replicator';
+    END IF;
+END
+$$;
 
--- Create application database
-CREATE DATABASE transvidio;
+-- Create application database (skip if already exists)
+SELECT 'CREATE DATABASE transvidio'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'transvidio')\gexec
 
 -- Connect to application database
 \c transvidio;

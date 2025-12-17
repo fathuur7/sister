@@ -3,7 +3,7 @@
 FROM python:3.11-slim
 
 # Install system dependencies
-# HAPUS library libav*-dev agar pip tidak mencoba build dari source yang akan gagal
+# Tambahkan libav*-dev untuk memungkinkan build av dari source jika binary wheel tidak tersedia
 RUN apt-get update && apt-get install -y \
     build-essential \
     gfortran \
@@ -17,6 +17,12 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     # Library tambahan untuk mendukung binary wheels
     libgomp1 \
+    # FFmpeg dev libraries untuk build PyAV dari source
+    libavcodec-dev \
+    libavformat-dev \
+    libavdevice-dev \
+    libswscale-dev \
+    libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure SSH for passwordless communication
@@ -44,7 +50,6 @@ COPY requirements-mpi.txt /mpi/requirements-mpi.txt
 # 2. Force install 'av' dari binary wheel untuk menghindari kompilasi ulang yang error
 # 3. Install sisa requirements dengan timeout tinggi untuk koneksi lambat
 RUN pip install --no-cache-dir --upgrade pip wheel setuptools && \
-    pip install --no-cache-dir --only-binary=:all: av==11.0.0 && \
     pip install --no-cache-dir --default-timeout=1000 -r requirements-mpi.txt
 
 # Expose SSH port

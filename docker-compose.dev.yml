@@ -148,6 +148,7 @@ services:
       - POSTGRES_MASTER_HOST=postgres-master
       - POSTGRES_SLAVE_HOSTS=postgres-slave1
       - REDIS_HOST=redis-master
+      - REDIS_PASSWORD=
       - MPI_MASTER_HOST=mpi-master
       - WHISPER_MODEL=${WHISPER_MODEL:-tiny}
     env_file:
@@ -181,6 +182,7 @@ services:
       - POSTGRES_MASTER_HOST=postgres-master
       - POSTGRES_SLAVE_HOSTS=postgres-slave1
       - REDIS_HOST=redis-master
+      - REDIS_PASSWORD=
       - MPI_MASTER_HOST=mpi-master
       - WHISPER_MODEL=${WHISPER_MODEL:-tiny}
     env_file:
@@ -214,10 +216,12 @@ services:
       context: ./nginx
     container_name: nginx-loadbalancer
     ports:
-      - "80:80"
+      - "8080:80"
+      - "8081:80"
     volumes:
       - ./nginx/nginx-dev.conf:/etc/nginx/nginx.conf:ro
       - video-outputs:/var/www/outputs:ro
+      - ./transvidio-frontend/dist:/usr/share/nginx/html:ro
     networks:
       - app-network
     depends_on:

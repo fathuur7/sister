@@ -106,22 +106,25 @@ class TranslationService:
                 translate_to=None  # Original language (no translation)
             )
 
-            # Simpan ke file
-            with open(srt_original_path, "w", encoding="utf-8") as f:
-                f.write(original_srt_content)
-
-            # Upload SRT original ke Cloudinary
-            print("Mengupload SRT original ke Cloudinary...")
-            srt_original_upload = upload_to_cloudinary(
-                file_path=srt_original_path,
-                resource_type="raw",
-                folder="subtitles"
-            )
-            
+            # Simpan ke file (hanya jika ada konten)
             srt_original_url = None
-            if srt_original_upload:
-                srt_original_url = srt_original_upload.get('secure_url')
-                print(f"SRT original berhasil diupload: {srt_original_url}")
+            if original_srt_content:
+                with open(srt_original_path, "w", encoding="utf-8") as f:
+                    f.write(original_srt_content)
+
+                # Upload SRT original ke Cloudinary
+                print("Mengupload SRT original ke Cloudinary...")
+                srt_original_upload = upload_to_cloudinary(
+                    file_path=srt_original_path,
+                    resource_type="raw",
+                    folder="subtitles"
+                )
+                
+                if srt_original_upload:
+                    srt_original_url = srt_original_upload.get('secure_url')
+                    print(f"SRT original berhasil diupload: {srt_original_url}")
+            else:
+                print("Warning: Tidak ada konten SRT original untuk disimpan.")
 
             # 4️⃣ Terjemahan (opsional)
             translated_srt_content = None
@@ -135,20 +138,24 @@ class TranslationService:
                     translate_to=target_language
                 )
 
-                with open(srt_translated_path, "w", encoding="utf-8") as f:
-                    f.write(translated_srt_content)
+                # Simpan ke file (hanya jika ada konten)
+                if translated_srt_content:
+                    with open(srt_translated_path, "w", encoding="utf-8") as f:
+                        f.write(translated_srt_content)
 
-                # Upload SRT terjemahan ke Cloudinary
-                print("Mengupload SRT terjemahan ke Cloudinary...")
-                srt_translated_upload = upload_to_cloudinary(
-                    file_path=srt_translated_path,
-                    resource_type="raw",
-                    folder="subtitles"
-                )
-                
-                if srt_translated_upload:
-                    srt_translated_url = srt_translated_upload.get('secure_url')
-                    print(f"SRT terjemahan berhasil diupload: {srt_translated_url}")
+                    # Upload SRT terjemahan ke Cloudinary
+                    print("Mengupload SRT terjemahan ke Cloudinary...")
+                    srt_translated_upload = upload_to_cloudinary(
+                        file_path=srt_translated_path,
+                        resource_type="raw",
+                        folder="subtitles"
+                    )
+                    
+                    if srt_translated_upload:
+                        srt_translated_url = srt_translated_upload.get('secure_url')
+                        print(f"SRT terjemahan berhasil diupload: {srt_translated_url}")
+                else:
+                    print("Warning: Tidak ada konten SRT terjemahan untuk disimpan.")
 
             # 5️⃣ Kembalikan hasil ke API
             output = {

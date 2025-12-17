@@ -16,7 +16,7 @@ interface UseAuthReturn {
   logout: () => Promise<void>;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
 export default function useAuth(): UseAuthReturn {
   const [user, setUser] = useState<User | null>(null);
@@ -90,7 +90,7 @@ export default function useAuth(): UseAuthReturn {
       }
 
       const data = await res.json();
-      
+
       if (data.success && data.user) {
         setUser(data.user);
         setError(null);
@@ -115,7 +115,7 @@ export default function useAuth(): UseAuthReturn {
     if (tokenFromUrl) {
       localStorage.setItem("access_token", tokenFromUrl);
       setToken(tokenFromUrl);
-      
+
       // Clean URL tanpa reload
       window.history.replaceState({}, "", window.location.pathname);
     }
