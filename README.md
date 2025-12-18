@@ -113,9 +113,9 @@ mpirun -np 3 -hostfile /etc/mpi/hostfile python mpi_service.py video.mp4 id
 
 ---
 
-### 2. PostgreSQL Database Cluster
+### 2. PostgreSQL Database Cluster (Distributed Database)
 
-**Fungsi:** Menyimpan data aplikasi dengan arsitektur Master-Slave untuk high availability dan read scaling.
+**Fungsi:** Menyimpan data aplikasi dengan arsitektur terdistribusi: Master-Slave replication, horizontal partitioning, vertical fragmentation, dan data aggregation.
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -132,34 +132,70 @@ mpirun -np 3 -hostfile /etc/mpi/hostfile python mpi_service.py video.mp4 id
 └────────────────────────────────────────────────────────────┘
 ```
 
-**Tables:**
-```sql
--- Videos table
-CREATE TABLE videos (
-    id SERIAL PRIMARY KEY,
-    filename VARCHAR(255) NOT NULL,
-    original_language VARCHAR(10),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+#### 2.1 Horizontal Fragmentation (Partitioning)
+Data dipartisi berdasarkan waktu untuk distribusi query yang efisien:
 
--- Transcriptions table  
-CREATE TABLE transcriptions (
-    id SERIAL PRIMARY KEY,
-    video_id INTEGER REFERENCES videos(id),
-    language VARCHAR(10) NOT NULL,
-    content TEXT,
-    srt_file_path VARCHAR(500),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+```sql
+-- Tabel videos dipartisi per quarter
+CREATE TABLE videos (...) PARTITION BY RANGE (created_at);
+
+-- Partisi otomatis berdasarkan tanggal
+videos_archive     -- Data sebelum 2025
+videos_2025_q1     -- Jan-Mar 2025
+videos_2025_q2     -- Apr-Jun 2025
+videos_2025_q3     -- Jul-Sep 2025  
+videos_2025_q4     -- Oct-Dec 2025
+videos_future      -- Data setelah 2025
 ```
 
-**Environment Variables:**
-```env
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=transvidio
-POSTGRES_MASTER_HOST=postgres-master
-POSTGRES_SLAVE_HOSTS=postgres-slave1
+#### 2.2 Vertical Fragmentation
+Data dipisah berdasarkan frekuensi akses:
+
+| Tabel | Data | Frekuensi Akses |
+|-------|------|-----------------|
+| `video_metadata` | filename, status, language | Tinggi |
+| `video_urls` | video_url, srt_urls | Rendah |
+
+#### 2.3 Aggregation Views
+View untuk mengagregasi data dari berbagai tabel:
+
+```sql
+-- Statistik per bahasa
+SELECT * FROM video_stats_by_language;
+
+-- Statistik bulanan
+SELECT * FROM video_stats_monthly;
+
+-- Integrasi data (JOIN metadata + URLs)
+SELECT * FROM video_complete;
+
+-- Statistik transcription
+SELECT * FROM transcription_stats;
+```
+
+#### 2.4 Materialized View (Cached Aggregation)
+```sql
+-- Dashboard statistik (cached untuk performa)
+SELECT * FROM dashboard_stats;
+
+-- Refresh data
+SELECT refresh_dashboard_stats();
+```
+
+#### 2.5 Verifikasi Implementasi
+
+```bash
+# Cek partisi tabel
+docker exec postgres-master psql -U postgres -d transvidio -c "\d+ videos"
+
+# Cek views aggregation
+docker exec postgres-master psql -U postgres -d transvidio -c "\dv"
+
+# Lihat statistik per bahasa
+docker exec postgres-master psql -U postgres -d transvidio -c "SELECT * FROM video_stats_by_language"
+
+# Lihat materialized view
+docker exec postgres-master psql -U postgres -d transvidio -c "SELECT * FROM dashboard_stats"
 ```
 
 **Replication Configuration:**
@@ -335,25 +371,31 @@ mpi-worker1         Up
 
 ---
 
-### Step 4: Aktifkan Cloudflare Tunnel
+### Step 4: Cek Cloudflare Tunnel
 
-```bash
-# Jalankan tunnel (pastikan config sudah ada di ~/.cloudflared/)
+Tunnel sudah berjalan sebagai **Windows Service** (otomatis start saat komputer menyala).
+
+atau jalankan manual:
+```powershell
 cloudflared tunnel run nadasaku
 ```
 
-**Atau jalankan di background (Windows):**
+**Cek status tunnel:**
 ```powershell
-Start-Process cloudflared -ArgumentList "tunnel run nadasaku" -WindowStyle Hidden
+# Cek service status
+Get-Service cloudflared
+
+# Cek proses
+Get-Process cloudflared
 ```
 
-**Atau sebagai Windows Service:**
+**Jika tunnel mati, jalankan manual:**
 ```powershell
-# Install sebagai service (sekali saja)
-cloudflared service install
-
 # Start service
-cloudflared service start
+Start-Service cloudflared
+
+# Atau jalankan manual
+cloudflared tunnel run nadasaku
 ```
 
 ---
